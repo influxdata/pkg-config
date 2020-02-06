@@ -9,7 +9,10 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
+	"strings"
 
+	"github.com/Masterminds/semver"
 	"github.com/influxdata/pkg-config/internal/modfile"
 	"github.com/influxdata/pkg-config/internal/modload"
 	"go.uber.org/zap"
@@ -40,7 +43,11 @@ func Configure(ctx context.Context, logger *zap.Logger) (*Library, error) {
 	if module.Module.Mod.Path == modulePath {
 		logger.Info("Flux module is the main module", zap.String("modroot", modroot))
 		dir := filepath.Join(modroot, "libflux")
-		return &Library{Dir: dir}, nil
+		v, err := getVersion(modroot)
+		if err != nil {
+			return nil, err
+		}
+		return &Library{Dir: dir, Version: v}, nil
 	}
 	return nil, errors.New("implement me")
 }
@@ -87,10 +94,39 @@ libdir=${exec_prefix}/lib
 includedir=${prefix}/include
 
 Name: Flux
-Version: 0.1.0
-Description: Library for the InfluxData Flux engine
+`)
+	_, _ = fmt.Fprintf(w, "Version: %s\n", l.Version)
+	_, _ = io.WriteString(w, `Description: Library for the InfluxData Flux engine
 Libs: -L${libdir} -lflux -llibstd
 Cflags: -I${includedir}
 `)
 	return nil
+}
+
+func getVersion(dir string) (string, error) {
+	cmd := exec.Command("git", "describe")
+	cmd.Dir = dir
+
+	out, err := cmd.Output()
+	if err != nil {
+		return "", err
+	}
+	versionStr := strings.TrimSpace(string(out))
+
+	re := regexp.MustCompile(`(v\d+\.\d+\.\d+)(-.*)?`)
+	m := re.FindStringSubmatch(versionStr)
+	if m == nil {
+		return "", fmt.Errorf("invalid tag version format: %s", versionStr)
+	}
+
+	if m[2] == "" {
+		return m[1][1:], nil
+	}
+
+	v, err := semver.NewVersion(m[1])
+	if err != nil {
+		return "", err
+	}
+	*v = v.IncMinor()
+	return v.String(), nil
 }

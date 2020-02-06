@@ -84,6 +84,17 @@ func MajorMinor(v string) string {
 	return v[:i] + "." + pv.minor
 }
 
+// Patch returns the patch version of the semantic version v.
+// For example, Patch("v2.1.0") == "0".
+// If v is an invalid semantic version string, Patch returns the empty string.
+func Patch(v string) string {
+	pv, ok := parse(v)
+	if !ok {
+		return ""
+	}
+	return pv.patch
+}
+
 // Prerelease returns the prerelease suffix of the semantic version v.
 // For example, Prerelease("v2.1.0-pre+meta") == "-pre".
 // If v is an invalid semantic version string, Prerelease returns the empty string.
