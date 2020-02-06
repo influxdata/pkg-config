@@ -3,21 +3,94 @@ package flux
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
+	"io/ioutil"
+	"os"
+	"os/exec"
+	"path/filepath"
 
+	"github.com/influxdata/pkg-config/internal/modfile"
+	"github.com/influxdata/pkg-config/internal/modload"
 	"go.uber.org/zap"
 )
 
-type Library struct{}
+type Library struct {
+	Version string
+	Dir     string
+}
+
+const modulePath = "github.com/influxdata/flux"
 
 func Configure(ctx context.Context, logger *zap.Logger) (*Library, error) {
-	return &Library{}, nil
+	modroot := modload.ModRoot()
+	data, err := ioutil.ReadFile(filepath.Join(modroot, "go.mod"))
+	if err != nil {
+		return nil, err
+	}
+
+	module, err := modfile.Parse(modroot, data, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	// If the module we are building is flux itself, then set
+	// the directory to the one where the module root is located
+	// so we are building locally.
+	if module.Module.Mod.Path == modulePath {
+		logger.Info("Flux module is the main module", zap.String("modroot", modroot))
+		dir := filepath.Join(modroot, "libflux")
+		return &Library{Dir: dir}, nil
+	}
+	return nil, errors.New("implement me")
 }
 
 func (l *Library) Install(ctx context.Context, logger *zap.Logger) error {
-	return errors.New("implement me")
+	logger.Info("Running cargo build", zap.String("dir", l.Dir))
+	cmd := exec.Command("cargo", "build", "--release")
+	cmd.Dir = l.Dir
+	if err := cmd.Run(); err != nil {
+		return err
+	}
+
+	libdir := filepath.Join(l.Dir, "lib")
+	logger.Info("Creating libdir", zap.String("libdir", libdir))
+	if err := os.MkdirAll(libdir, 0755); err != nil {
+		return err
+	}
+
+	libnames := []string{"flux", "libstd"}
+	for _, name := range libnames {
+		basename := fmt.Sprintf("lib%s.a", name)
+		src := filepath.Join(l.Dir, "target", "release", basename)
+		dst := filepath.Join(libdir, basename)
+		logger.Info("Linking library to libdir", zap.String("src", src), zap.String("dst", dst))
+		if _, err := os.Stat(dst); err == nil {
+			_ = os.Remove(dst)
+		}
+
+		if err := os.Link(src, dst); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (l *Library) WritePackageConfig(w io.Writer) error {
-	return errors.New("implement me")
+	if l.Dir == "" {
+		return errors.New("flux library directory not set")
+	}
+
+	_, _ = fmt.Fprintf(w, "prefix=%s\n", l.Dir)
+	_, _ = io.WriteString(w, `exec_prefix=${prefix}
+libdir=${exec_prefix}/lib
+includedir=${prefix}/include
+
+Name: Flux
+Version: 0.1.0
+Description: Library for the InfluxData Flux engine
+Libs: -L${libdir} -lflux -llibstd
+Cflags: -I${includedir}
+`)
+	return nil
 }
