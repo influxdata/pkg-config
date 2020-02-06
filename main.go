@@ -1,19 +1,34 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 
+	"github.com/influxdata/pkg-config/libs/flux"
 	"github.com/spf13/pflag"
 	"go.uber.org/zap"
 )
 
 const pkgConfigExecName = "pkg-config"
+
+// Library is the interface for building and installing a library
+// for use by package config.
+type Library interface {
+	// Install will be used to build and install the library into
+	// the directory.
+	Install(ctx context.Context, l *zap.Logger) error
+
+	// WritePackageConfig will write out the package configuration
+	// for this library to the given writer.
+	WritePackageConfig(w io.Writer) error
+}
 
 func getArg0Path() string {
 	arg0 := os.Args[0]
@@ -102,11 +117,24 @@ func runPkgConfig(execCmd, pkgConfigPath string, libs []string, flags Flags) err
 	return cmd.Run()
 }
 
+func getLibraryFor(ctx context.Context, name string) (Library, bool, error) {
+	switch name {
+	case "flux":
+		l, err := flux.Configure(ctx, logger)
+		if err != nil {
+			return nil, true, err
+		}
+		return l, true, nil
+	}
+	return nil, false, nil
+}
+
 func realMain() int {
 	if err := configureLogger(&logger); err != nil {
 		panic(err)
 	}
 
+	ctx := context.TODO()
 	arg0path := getArg0Path()
 	logger.Info("Started pkg-config", zap.String("arg0", arg0path), zap.Strings("args", os.Args[1:]))
 	pkgConfigExec, err := lookPath(getArg0Path())
@@ -132,6 +160,29 @@ func realMain() int {
 	defer func() { _ = os.RemoveAll(pkgConfigPath) }()
 
 	// Construct the packages and write pkgconfig files to point to those packages.
+	for _, lib := range libs {
+		if l, ok, err := getLibraryFor(ctx, lib); err != nil {
+			logger.Error("Error configuring library", zap.String("name", lib), zap.Error(err))
+			return 1
+		} else if ok {
+			if err := l.Install(ctx, logger); err != nil {
+				logger.Error("Error installing library", zap.String("name", lib), zap.Error(err))
+				return 1
+			}
+
+			pkgfile := filepath.Join(pkgConfigPath, lib+".pc")
+			f, err := os.Create(pkgfile)
+			if err != nil {
+				logger.Error("Could not create pkg-config configuration file", zap.String("path", pkgfile), zap.Error(err))
+				return 1
+			}
+
+			if err := l.WritePackageConfig(f); err != nil {
+				logger.Error("Error writing pkg-config configuration file", zap.String("path", pkgfile), zap.Error(err))
+				return 1
+			}
+		}
+	}
 
 	// Run pkgconfig for the given libraries and flags.
 	if err := runPkgConfig(pkgConfigExec, pkgConfigPath, libs, flags); err != nil {
