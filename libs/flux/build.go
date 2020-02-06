@@ -2,7 +2,7 @@ package flux
 
 import (
 	"context"
-	"errors"
+	"encoding/json"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -15,10 +15,12 @@ import (
 	"github.com/Masterminds/semver"
 	"github.com/influxdata/pkg-config/internal/modfile"
 	"github.com/influxdata/pkg-config/internal/modload"
+	"github.com/influxdata/pkg-config/internal/module"
 	"go.uber.org/zap"
 )
 
 type Library struct {
+	Path    string
 	Version string
 	Dir     string
 }
@@ -37,30 +39,22 @@ func Configure(ctx context.Context, logger *zap.Logger) (*Library, error) {
 		return nil, err
 	}
 
-	// If the module we are building is flux itself, then set
-	// the directory to the one where the module root is located
-	// so we are building locally.
-	if module.Module.Mod.Path == modulePath {
-		logger.Info("Flux module is the main module", zap.String("modroot", modroot))
-		dir := filepath.Join(modroot, "libflux")
-		v, err := getVersion(modroot)
-		if err != nil {
-			return nil, err
-		}
-		return &Library{Dir: dir, Version: v}, nil
+	ver, dir, err := findModule(module, logger)
+	if err != nil {
+		return nil, err
 	}
-	return nil, errors.New("implement me")
+	return &Library{Path: ver.Path, Version: ver.Version, Dir: dir}, nil
 }
 
 func (l *Library) Install(ctx context.Context, logger *zap.Logger) error {
-	logger.Info("Running cargo build", zap.String("dir", l.Dir))
 	cmd := exec.Command("cargo", "build", "--release")
-	cmd.Dir = l.Dir
+	cmd.Dir = filepath.Join(l.Dir, "libflux")
+	logger.Info("Running cargo build", zap.String("dir", cmd.Dir))
 	if err := cmd.Run(); err != nil {
 		return err
 	}
 
-	libdir := filepath.Join(l.Dir, "lib")
+	libdir := filepath.Join(cmd.Dir, "lib")
 	logger.Info("Creating libdir", zap.String("libdir", libdir))
 	if err := os.MkdirAll(libdir, 0755); err != nil {
 		return err
@@ -69,7 +63,7 @@ func (l *Library) Install(ctx context.Context, logger *zap.Logger) error {
 	libnames := []string{"flux", "libstd"}
 	for _, name := range libnames {
 		basename := fmt.Sprintf("lib%s.a", name)
-		src := filepath.Join(l.Dir, "target", "release", basename)
+		src := filepath.Join(cmd.Dir, "target", "release", basename)
 		dst := filepath.Join(libdir, basename)
 		logger.Info("Linking library to libdir", zap.String("src", src), zap.String("dst", dst))
 		if _, err := os.Stat(dst); err == nil {
@@ -84,23 +78,94 @@ func (l *Library) Install(ctx context.Context, logger *zap.Logger) error {
 }
 
 func (l *Library) WritePackageConfig(w io.Writer) error {
-	if l.Dir == "" {
-		return errors.New("flux library directory not set")
-	}
-
-	_, _ = fmt.Fprintf(w, "prefix=%s\n", l.Dir)
+	prefix := filepath.Join(l.Dir, "libflux")
+	_, _ = fmt.Fprintf(w, "prefix=%s\n", prefix)
 	_, _ = io.WriteString(w, `exec_prefix=${prefix}
 libdir=${exec_prefix}/lib
 includedir=${prefix}/include
 
 Name: Flux
 `)
-	_, _ = fmt.Fprintf(w, "Version: %s\n", l.Version)
+	_, _ = fmt.Fprintf(w, "Version: %s\n", l.Version[1:])
 	_, _ = io.WriteString(w, `Description: Library for the InfluxData Flux engine
 Libs: -L${libdir} -lflux -llibstd
 Cflags: -I${includedir}
 `)
 	return nil
+}
+
+// findModule will find the module in the module file and instantiate
+// a module.Version that points to a local copy of the module.
+func findModule(mod *modfile.File, logger *zap.Logger) (module.Version, string, error) {
+	if mod.Module.Mod.Path == modulePath {
+		modroot := modload.ModRoot()
+		logger.Info("Flux module is the main module", zap.String("modroot", modroot))
+		v, err := getVersion(modroot)
+		if err != nil {
+			return module.Version{}, "", err
+		}
+		return module.Version{Version: v}, modroot, nil
+	}
+
+	// Attempt to find the module in the list of replace values.
+	for _, replace := range mod.Replace {
+		if replace.Old.Path == modulePath {
+			return getModule(replace.New, logger)
+		}
+	}
+
+	// Attempt to find the module in the normal dependencies.
+	for _, m := range mod.Require {
+		if m.Mod.Path == modulePath {
+			return getModule(m.Mod, logger)
+		}
+	}
+	return module.Version{}, "", fmt.Errorf("could not find %s module", modulePath)
+}
+
+// getModule will retrieve or copy the module sources to the go build cache.
+func getModule(ver module.Version, logger *zap.Logger) (module.Version, string, error) {
+	if strings.HasPrefix(ver.Path, "/") || strings.HasPrefix(ver.Path, ".") {
+		// We are dealing with a filepath meaning we are building from the filesystem.
+		// If this is the case, this is the same as building from the main module.
+		// We fill out the version using any git version data and return as-is.
+		logger.Info("Module path references the filesystem")
+		v, err := getVersion(ver.Path)
+		if err != nil {
+			return module.Version{}, "", err
+		}
+		abspath, err := filepath.Abs(ver.Path)
+		if err != nil {
+			return module.Version{}, "", err
+		}
+		return module.Version{Version: v}, abspath, nil
+	}
+
+	// This references a module. Use go mod download to download the module.
+	// We use go mod download specifically to avoid downloading extra dependencies.
+	// This should work properly even if vendor was used for the dependencies.
+	return downloadModule(ver, logger)
+}
+
+// downloadModule will download the module to a file path.
+func downloadModule(ver module.Version, logger *zap.Logger) (module.Version, string, error) {
+	// Download the module and send the JSON output to stdout.
+	cmd := exec.Command("go", "mod", "download", "-json", ver.Path)
+	data, err := cmd.Output()
+	if err != nil {
+		return module.Version{}, "", err
+	}
+
+	// Download succeeded. Deserialize the JSON to find the file path.
+	var m struct {
+		Dir     string
+		Path    string
+		Version string
+	}
+	if err := json.Unmarshal(data, &m); err != nil {
+		return module.Version{}, "", err
+	}
+	return module.Version{Path: m.Path, Version: m.Version}, m.Dir, nil
 }
 
 func getVersion(dir string) (string, error) {
@@ -128,5 +193,5 @@ func getVersion(dir string) (string, error) {
 		return "", err
 	}
 	*v = v.IncMinor()
-	return v.String(), nil
+	return "v" + v.String(), nil
 }
