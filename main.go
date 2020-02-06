@@ -2,6 +2,8 @@ package main
 
 import (
 	"errors"
+	"fmt"
+	"io/ioutil"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -75,7 +77,7 @@ func parseFlags(name string, args []string) ([]string, Flags, error) {
 	return flagSet.Args(), flags, nil
 }
 
-func runPkgConfig(execCmd string, libs []string, flags Flags) error {
+func runPkgConfig(execCmd, pkgConfigPath string, libs []string, flags Flags) error {
 	args := make([]string, 0, len(libs)+3)
 	if flags.Cflags {
 		args = append(args, "--cflags")
@@ -86,9 +88,17 @@ func runPkgConfig(execCmd string, libs []string, flags Flags) error {
 	args = append(args, "--")
 	args = append(args, libs...)
 
+	pathEnv := os.Getenv("PKG_CONFIG_PATH")
+	if pathEnv != "" {
+		pathEnv = fmt.Sprintf("%s%c%s", pkgConfigPath, os.PathListSeparator, pathEnv)
+	} else {
+		pathEnv = pkgConfigPath
+	}
+
 	cmd := exec.Command(execCmd, args...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
+	cmd.Env = append(os.Environ(), fmt.Sprintf("PKG_CONFIG_PATH=%s", pathEnv))
 	return cmd.Run()
 }
 
@@ -112,11 +122,19 @@ func realMain() int {
 		return 1
 	}
 
-	// TODO(jsternberg): Intercept the libraries that we build,
-	// build the libraries, generate the pkg-config files, then intercept
-	// the path into pkg-config's search path.
+	// Construct a temporary path where we will place all of the generated
+	// pkgconfig files.
+	pkgConfigPath, err := ioutil.TempDir("", "pkgconfig")
+	if err != nil {
+		logger.Error("Unable to create temporary directory for pkgconfig files", zap.Error(err))
+		return 1
+	}
+	defer func() { _ = os.RemoveAll(pkgConfigPath) }()
 
-	if err := runPkgConfig(pkgConfigExec, libs, flags); err != nil {
+	// Construct the packages and write pkgconfig files to point to those packages.
+
+	// Run pkgconfig for the given libraries and flags.
+	if err := runPkgConfig(pkgConfigExec, pkgConfigPath, libs, flags); err != nil {
 		logger.Error("Running pkg-config failed", zap.Error(err))
 		return 1
 	}
