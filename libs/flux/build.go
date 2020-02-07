@@ -47,6 +47,10 @@ func Configure(ctx context.Context, logger *zap.Logger) (*Library, error) {
 }
 
 func (l *Library) Install(ctx context.Context, logger *zap.Logger) error {
+	if err := l.copyIfReadOnly(ctx, logger); err != nil {
+		return err
+	}
+
 	cmd := exec.Command("cargo", "build", "--release")
 	cmd.Dir = filepath.Join(l.Dir, "libflux")
 	logger.Info("Running cargo build", zap.String("dir", cmd.Dir))
@@ -74,6 +78,63 @@ func (l *Library) Install(ctx context.Context, logger *zap.Logger) error {
 			return err
 		}
 	}
+	return nil
+}
+
+// copyIfReadOnly will copy the module to another location if the directory is read only.
+func (l *Library) copyIfReadOnly(ctx context.Context, logger *zap.Logger) error {
+	if st, err := os.Stat(l.Dir); err != nil {
+		return err
+	} else if st.Mode()&0200 != 0 {
+		return nil
+	}
+
+	// Find the go cache as this is a safe place for us to copy the sources to.
+	cache, err := getGoCache()
+	if err != nil {
+		return err
+	}
+
+	// Determine the source path. If the directory already exists,
+	// then we have already copied the files.
+	srcdir := filepath.Join(cache, "pkgconfig", l.Path+"@"+l.Version)
+	if _, err := os.Stat(srcdir); err == nil {
+		l.Dir = srcdir
+		return nil
+	}
+
+	// Copy over the directory.
+	if err := filepath.Walk(l.Dir, func(path string, info os.FileInfo, err error) error {
+		relpath, err := filepath.Rel(l.Dir, path)
+		if err != nil {
+			return err
+		}
+
+		targetpath := filepath.Join(srcdir, relpath)
+		if info.IsDir() {
+			return os.MkdirAll(targetpath, 0755)
+		}
+
+		r, err := os.Open(path)
+		if err != nil {
+			return err
+		}
+		defer func() { _ = r.Close() }()
+
+		w, err := os.Create(targetpath)
+		if err != nil {
+			return err
+		}
+
+		if _, err := io.Copy(w, r); err != nil {
+			return err
+		}
+		return w.Close()
+	}); err != nil {
+		return err
+	}
+
+	l.Dir = srcdir
 	return nil
 }
 
@@ -194,4 +255,17 @@ func getVersion(dir string) (string, error) {
 	}
 	*v = v.IncMinor()
 	return "v" + v.String(), nil
+}
+
+func getGoCache() (string, error) {
+	if cacheDir := os.Getenv("GOCACHE"); cacheDir != "" {
+		return cacheDir, nil
+	}
+
+	cmd := exec.Command("go", "env", "GOCACHE")
+	out, err := cmd.Output()
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(out)), nil
 }
