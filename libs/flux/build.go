@@ -19,15 +19,30 @@ import (
 	"go.uber.org/zap"
 )
 
+type Target struct {
+	OS   string
+	Arch string
+}
+
+func (t Target) String() string {
+	return fmt.Sprintf("%s_%s", t.OS, t.Arch)
+}
+
 type Library struct {
 	Path    string
 	Version string
 	Dir     string
+	Target  Target
 }
 
 const modulePath = "github.com/influxdata/flux"
 
 func Configure(ctx context.Context, logger *zap.Logger) (*Library, error) {
+	target, err := getTarget()
+	if err != nil {
+		return nil, err
+	}
+
 	modroot := modload.ModRoot()
 	data, err := ioutil.ReadFile(filepath.Join(modroot, "go.mod"))
 	if err != nil {
@@ -43,7 +58,12 @@ func Configure(ctx context.Context, logger *zap.Logger) (*Library, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Library{Path: ver.Path, Version: ver.Version, Dir: dir}, nil
+	return &Library{
+		Path:    ver.Path,
+		Version: ver.Version,
+		Dir:     dir,
+		Target:  target,
+	}, nil
 }
 
 func (l *Library) Install(ctx context.Context, logger *zap.Logger) error {
@@ -58,7 +78,7 @@ func (l *Library) Install(ctx context.Context, logger *zap.Logger) error {
 		return err
 	}
 
-	libdir := filepath.Join(cmd.Dir, "lib")
+	libdir := filepath.Join(cmd.Dir, "lib", l.Target.String())
 	logger.Info("Creating libdir", zap.String("libdir", libdir))
 	if err := os.MkdirAll(libdir, 0755); err != nil {
 		return err
@@ -141,17 +161,21 @@ func (l *Library) copyIfReadOnly(ctx context.Context, logger *zap.Logger) error 
 func (l *Library) WritePackageConfig(w io.Writer) error {
 	prefix := filepath.Join(l.Dir, "libflux")
 	_, _ = fmt.Fprintf(w, "prefix=%s\n", prefix)
+	_, _ = fmt.Fprintf(w, "target=%s\n", l.Target)
 	_, _ = io.WriteString(w, `exec_prefix=${prefix}
-libdir=${exec_prefix}/lib
+libdir=${exec_prefix}/lib/${target}
 includedir=${prefix}/include
 
 Name: Flux
 `)
 	_, _ = fmt.Fprintf(w, "Version: %s\n", l.Version[1:])
-	_, _ = io.WriteString(w, `Description: Library for the InfluxData Flux engine
-Libs: -L${libdir} -lflux -llibstd
-Cflags: -I${includedir}
-`)
+	_, _ = fmt.Fprintln(w, `Description: Library for the InfluxData Flux engine`)
+	if l.Target.OS == "linux" {
+		_, _ = fmt.Fprintf(w, "Libs: -L${libdir} -lflux -llibstd -ldl\n")
+	} else {
+		_, _ = fmt.Fprintf(w, "Libs: -L${libdir} -lflux -llibstd\n")
+	}
+	_, _ = fmt.Fprintln(w, `Cflags: -I${includedir}`)
 	return nil
 }
 
@@ -268,4 +292,27 @@ func getGoCache() (string, error) {
 		return "", err
 	}
 	return strings.TrimSpace(string(out)), nil
+}
+
+func getTarget() (Target, error) {
+	goos := os.Getenv("GOOS")
+	if goos == "" {
+		cmd := exec.Command("go", "env", "GOOS")
+		out, err := cmd.Output()
+		if err != nil {
+			return Target{}, err
+		}
+		goos = strings.TrimSpace(string(out))
+	}
+
+	goarch := os.Getenv("GOARCH")
+	if goarch == "" {
+		cmd := exec.Command("go", "env", "GOARCH")
+		out, err := cmd.Output()
+		if err != nil {
+			return Target{}, err
+		}
+		goarch = strings.TrimSpace(string(out))
+	}
+	return Target{OS: goos, Arch: goarch}, nil
 }
