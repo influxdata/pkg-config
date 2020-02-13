@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -39,23 +38,31 @@ func getArg0Path() string {
 	return filepath.Join(cwd, arg0)
 }
 
-func lookPath(arg0path string) (string, error) {
+func modifyPath(arg0path string) error {
 	path := os.Getenv("PATH")
-	for _, dir := range filepath.SplitList(path) {
+	list := filepath.SplitList(path)
+	// Search the path to see if the currently executing executable
+	// is on the path. We will only select pkg-config implementations that
+	// are in the list after our current one.
+	// We work backwards so we can find the last entry for the executable in case
+	// the same path is on the path twice.
+	for i := len(list) - 1; i >= 0; i-- {
+		dir := list[i]
 		if dir == "" {
 			// Unix shell semantics: path element "" means "."
 			dir = "."
 		}
+
 		dir, _ = filepath.Abs(dir)
 		path := filepath.Join(dir, pkgConfigExecName)
 		if arg0path == path {
-			// Exclude this executable from the search path.
-			continue
-		} else if _, err := exec.LookPath(path); err == nil {
-			return path, nil
+			// Modify the list to exclude the current element and break out of the loop.
+			list = list[i+1:]
+			break
 		}
 	}
-	return "", errors.New("pkg-config executable not found on PATH")
+	path = strings.Join(list, string(filepath.ListSeparator))
+	return os.Setenv("PATH", path)
 }
 
 var logger *zap.Logger
@@ -137,7 +144,10 @@ func realMain() int {
 	ctx := context.TODO()
 	arg0path := getArg0Path()
 	logger.Info("Started pkg-config", zap.String("arg0", arg0path), zap.Strings("args", os.Args[1:]))
-	pkgConfigExec, err := lookPath(getArg0Path())
+	if err := modifyPath(getArg0Path()); err != nil {
+		logger.Error("Unable to modify PATH variable", zap.Error(err))
+	}
+	pkgConfigExec, err := exec.LookPath("pkg-config")
 	if err != nil {
 		logger.Error("Could not find pkg-config executable", zap.Error(err))
 		return 1
