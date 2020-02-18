@@ -229,13 +229,13 @@ func getModule(ver module.Version, logger *zap.Logger) (module.Version, string, 
 	// This references a module. Use go mod download to download the module.
 	// We use go mod download specifically to avoid downloading extra dependencies.
 	// This should work properly even if vendor was used for the dependencies.
-	return downloadModule(ver, logger)
+	return downloadModule(logger)
 }
 
 // downloadModule will download the module to a file path.
-func downloadModule(ver module.Version, logger *zap.Logger) (module.Version, string, error) {
+func downloadModule(logger *zap.Logger) (module.Version, string, error) {
 	// Download the module and send the JSON output to stdout.
-	cmd := exec.Command("go", "mod", "download", "-json", ver.Path)
+	cmd := exec.Command("go", "mod", "download", "-json", modulePath)
 	data, err := cmd.Output()
 	if err != nil {
 		return module.Version{}, "", err
