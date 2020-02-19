@@ -1,6 +1,7 @@
 package flux
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -13,6 +14,7 @@ import (
 	"strings"
 
 	"github.com/Masterminds/semver"
+	"github.com/influxdata/pkg-config/internal/logutil"
 	"github.com/influxdata/pkg-config/internal/modfile"
 	"github.com/influxdata/pkg-config/internal/modload"
 	"github.com/influxdata/pkg-config/internal/module"
@@ -71,10 +73,14 @@ func (l *Library) Install(ctx context.Context, logger *zap.Logger) error {
 		return err
 	}
 
+	var stderr bytes.Buffer
 	cmd := exec.Command("cargo", "build", "--release")
+	cmd.Stdout = &stderr
+	cmd.Stderr = &stderr
 	cmd.Dir = filepath.Join(l.Dir, "libflux")
 	logger.Info("Running cargo build", zap.String("dir", cmd.Dir))
 	if err := cmd.Run(); err != nil {
+		_ = logutil.LogOutput(&stderr, logger)
 		return err
 	}
 
@@ -185,7 +191,7 @@ func findModule(mod *modfile.File, logger *zap.Logger) (module.Version, string, 
 	if mod.Module.Mod.Path == modulePath {
 		modroot := modload.ModRoot()
 		logger.Info("Flux module is the main module", zap.String("modroot", modroot))
-		v, err := getVersion(modroot)
+		v, err := getVersion(modroot, logger)
 		if err != nil {
 			return module.Version{}, "", err
 		}
@@ -215,7 +221,7 @@ func getModule(ver module.Version, logger *zap.Logger) (module.Version, string, 
 		// If this is the case, this is the same as building from the main module.
 		// We fill out the version using any git version data and return as-is.
 		logger.Info("Module path references the filesystem")
-		v, err := getVersion(ver.Path)
+		v, err := getVersion(ver.Path, logger)
 		if err != nil {
 			return module.Version{}, "", err
 		}
@@ -235,9 +241,12 @@ func getModule(ver module.Version, logger *zap.Logger) (module.Version, string, 
 // downloadModule will download the module to a file path.
 func downloadModule(logger *zap.Logger) (module.Version, string, error) {
 	// Download the module and send the JSON output to stdout.
+	var stderr bytes.Buffer
 	cmd := exec.Command("go", "mod", "download", "-json", modulePath)
+	cmd.Stderr = &stderr
 	data, err := cmd.Output()
 	if err != nil {
+		_ = logutil.LogOutput(&stderr, logger)
 		return module.Version{}, "", err
 	}
 
@@ -253,12 +262,15 @@ func downloadModule(logger *zap.Logger) (module.Version, string, error) {
 	return module.Version{Path: m.Path, Version: m.Version}, m.Dir, nil
 }
 
-func getVersion(dir string) (string, error) {
+func getVersion(dir string, logger *zap.Logger) (string, error) {
+	var stderr bytes.Buffer
 	cmd := exec.Command("git", "describe")
+	cmd.Stderr = &stderr
 	cmd.Dir = dir
 
 	out, err := cmd.Output()
 	if err != nil {
+		_ = logutil.LogOutput(&stderr, logger)
 		return "", err
 	}
 	versionStr := strings.TrimSpace(string(out))

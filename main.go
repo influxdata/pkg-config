@@ -83,10 +83,11 @@ var (
 )
 
 func configureLogger(logger **zap.Logger) error {
-	config := zap.NewProductionEncoderConfig()
 	cores := make([]zapcore.Core, 0, 2)
 	cores = append(cores, zapcore.NewCore(
-		zapcore.NewConsoleEncoder(config),
+		zapcore.NewConsoleEncoder(zapcore.EncoderConfig{
+			MessageKey: "msg",
+		}),
 		zapcore.AddSync(&stderr),
 		zap.InfoLevel,
 	))
@@ -96,7 +97,7 @@ func configureLogger(logger **zap.Logger) error {
 			return err
 		}
 		cores = append(cores, zapcore.NewCore(
-			zapcore.NewJSONEncoder(config),
+			zapcore.NewJSONEncoder(zap.NewProductionEncoderConfig()),
 			f,
 			zap.InfoLevel,
 		))
