@@ -31,13 +31,23 @@ type Library interface {
 	WritePackageConfig(w io.Writer) error
 }
 
+// getArg0Path gets an absolute path to where this binary was executed.
 func getArg0Path() string {
 	arg0 := os.Args[0]
 	if strings.Contains(arg0, "/") {
 		return arg0
 	}
-	cwd, _ := os.Getwd()
-	return filepath.Join(cwd, arg0)
+
+	// If we do not have a slash in the arg0 path then
+	// it was executed from the first path on the path.
+	path := os.Getenv("PATH")
+	for _, dir := range filepath.SplitList(path) {
+		execpath := filepath.Join(dir, arg0)
+		if st, err := os.Stat(execpath); err == nil && st.Mode()&0111 != 0 {
+			return execpath
+		}
+	}
+	return arg0
 }
 
 func modifyPath(arg0path string) error {
