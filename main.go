@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -13,6 +14,7 @@ import (
 	"github.com/influxdata/pkg-config/libs/flux"
 	"github.com/spf13/pflag"
 	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 )
 
 const pkgConfigExecName = "pkg-config"
@@ -65,21 +67,31 @@ func modifyPath(arg0path string) error {
 	return os.Setenv("PATH", path)
 }
 
-var logger *zap.Logger
+var (
+	logger *zap.Logger
+	stderr bytes.Buffer
+)
 
 func configureLogger(logger **zap.Logger) error {
-	logPath := os.Getenv("PKG_CONFIG_LOG")
-	if logPath == "" {
-		*logger = zap.NewNop()
-		return nil
+	config := zap.NewProductionEncoderConfig()
+	cores := make([]zapcore.Core, 0, 2)
+	cores = append(cores, zapcore.NewCore(
+		zapcore.NewConsoleEncoder(config),
+		zapcore.AddSync(&stderr),
+		zap.InfoLevel,
+	))
+	if logPath := os.Getenv("PKG_CONFIG_LOG"); logPath != "" {
+		f, err := os.OpenFile(logPath, os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0644)
+		if err != nil {
+			return err
+		}
+		cores = append(cores, zapcore.NewCore(
+			zapcore.NewJSONEncoder(config),
+			f,
+			zap.InfoLevel,
+		))
 	}
-	config := zap.NewProductionConfig()
-	config.OutputPaths = []string{logPath}
-	l, err := config.Build()
-	if err != nil {
-		return err
-	}
-	*logger = l
+	*logger = zap.New(zapcore.NewTee(cores...))
 	return nil
 }
 
@@ -140,6 +152,7 @@ func realMain() int {
 	if err := configureLogger(&logger); err != nil {
 		panic(err)
 	}
+	defer func() { _ = logger.Sync() }()
 
 	ctx := context.TODO()
 	arg0path := getArg0Path()
@@ -152,7 +165,7 @@ func realMain() int {
 		logger.Error("Could not find pkg-config executable", zap.Error(err))
 		return 1
 	}
-	logger.Info("Found pkg-config execute", zap.String("path", pkgConfigExec))
+	logger.Info("Found pkg-config executable", zap.String("path", pkgConfigExec))
 
 	libs, flags, err := parseFlags(os.Args[0], os.Args[1:])
 	if err != nil {
@@ -203,5 +216,8 @@ func realMain() int {
 }
 
 func main() {
-	os.Exit(realMain())
+	if retcode := realMain(); retcode != 0 {
+		_, _ = io.Copy(os.Stderr, &stderr)
+		os.Exit(retcode)
+	}
 }
