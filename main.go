@@ -166,8 +166,10 @@ func realMain() int {
 	defer func() { _ = logger.Sync() }()
 
 	ctx := context.TODO()
+
 	arg0path := getArg0Path()
 	logger.Info("Started pkg-config", zap.String("arg0", arg0path), zap.Strings("args", os.Args[1:]))
+	origPath := os.Getenv("PATH")
 	if err := modifyPath(getArg0Path()); err != nil {
 		logger.Error("Unable to modify PATH variable", zap.Error(err))
 	}
@@ -177,6 +179,7 @@ func realMain() int {
 		return 1
 	}
 	logger.Info("Found pkg-config executable", zap.String("path", pkgConfigExec))
+	os.Setenv("PATH", origPath)
 
 	libs, flags, err := parseFlags(os.Args[0], os.Args[1:])
 	if err != nil {
