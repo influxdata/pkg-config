@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -46,6 +47,7 @@ func Configure(ctx context.Context, logger *zap.Logger) (*Library, error) {
 	}
 
 	modroot := modload.ModRoot()
+	logger.Info("Determined module root", zap.String("path", modroot))
 	data, err := ioutil.ReadFile(filepath.Join(modroot, "go.mod"))
 	if err != nil {
 		return nil, err
@@ -195,7 +197,10 @@ func findModule(mod *modfile.File, logger *zap.Logger) (module.Version, string, 
 		if err != nil {
 			return module.Version{}, "", err
 		}
-		return module.Version{Version: v}, modroot, nil
+		return module.Version{
+			Path:    modulePath,
+			Version: v,
+		}, modroot, nil
 	}
 
 	// Attempt to find the module in the list of replace values.
@@ -244,6 +249,7 @@ func downloadModule(logger *zap.Logger) (module.Version, string, error) {
 	var stderr bytes.Buffer
 	cmd := exec.Command("go", "mod", "download", "-json", modulePath)
 	cmd.Stderr = &stderr
+	cmd.Dir = modload.ModRoot()
 	data, err := cmd.Output()
 	if err != nil {
 		_ = logutil.LogOutput(&stderr, logger)
@@ -263,6 +269,31 @@ func downloadModule(logger *zap.Logger) (module.Version, string, error) {
 }
 
 func getVersion(dir string, logger *zap.Logger) (string, error) {
+	if v, err := getVersionFromPath(dir); err != nil {
+		logger.Info("Could not determine version from base path", zap.Error(err))
+	} else {
+		return v, nil
+	}
+
+	if v, err := getVersionFromGit(dir, logger); err != nil {
+		logger.Info("Could not determine version from git data", zap.Error(err))
+	} else {
+		return v, nil
+	}
+	logger.Info("Using default version")
+	return "", errors.New("unable to determine flux repository version")
+}
+
+func getVersionFromPath(dir string) (string, error) {
+	reModulePath := regexp.MustCompile(`/github\.com/influxdata\/flux@(v\d+\.\d+\.\d+.*)$`)
+	m := reModulePath.FindStringSubmatch(dir)
+	if m == nil {
+		return "", fmt.Errorf("directory path did not match the module pattern: %s", dir)
+	}
+	return m[1], nil
+}
+
+func getVersionFromGit(dir string, logger *zap.Logger) (string, error) {
 	var stderr bytes.Buffer
 	cmd := exec.Command("git", "describe")
 	cmd.Stderr = &stderr
