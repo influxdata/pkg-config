@@ -38,6 +38,15 @@ func getArg0Path() string {
 		return arg0
 	}
 
+	// If PKG_CONFIG was set, then we will just unset that
+	// variable and assume that we are them.
+	// If we are wrong, it will get sorted out on the next call
+	// to this executable.
+	if pkgconfig := os.Getenv("PKG_CONFIG"); pkgconfig != "" {
+		// This gets unset in modifyPath.
+		return pkgconfig
+	}
+
 	// If we do not have a slash in the arg0 path then
 	// it was executed from the first path on the path.
 	path := os.Getenv("PATH")
@@ -51,6 +60,9 @@ func getArg0Path() string {
 }
 
 func modifyPath(arg0path string) error {
+	if pkgconfig := os.Getenv("PKG_CONFIG"); pkgconfig == arg0path {
+		return os.Unsetenv("PKG_CONFIG")
+	}
 	path := os.Getenv("PATH")
 	list := filepath.SplitList(path)
 	// Search the path to see if the currently executing executable
@@ -175,7 +187,7 @@ func realMain() int {
 	}
 	pkgConfigExec, err := exec.LookPath("pkg-config")
 	if err != nil {
-		logger.Error("Could not find pkg-config executable", zap.Error(err))
+		logger.Error("Could not find pkg-config executable", zap.String("path", os.Getenv("PATH")), zap.Error(err))
 		return 1
 	}
 	logger.Info("Found pkg-config executable", zap.String("path", pkgConfigExec))
