@@ -76,7 +76,11 @@ func (l *Library) Install(ctx context.Context, logger *zap.Logger) error {
 	}
 
 	var stderr bytes.Buffer
-	cmd := exec.Command("cargo", "build", "--release")
+	cargoCmd := os.Getenv("CARGO")
+	if cargoCmd == "" {
+		cargoCmd = "cargo"
+	}
+	cmd := exec.Command(cargoCmd, "build", "--release")
 	cmd.Stdout = &stderr
 	cmd.Stderr = &stderr
 	cmd.Dir = filepath.Join(l.Dir, "libflux")
