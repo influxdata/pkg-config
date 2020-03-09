@@ -23,12 +23,28 @@ import (
 )
 
 type Target struct {
-	OS   string
-	Arch string
+	OS     string
+	Arch   string
+	Static bool
 }
 
 func (t Target) String() string {
-	return fmt.Sprintf("%s_%s", t.OS, t.Arch)
+	s := fmt.Sprintf("%s_%s", t.OS, t.Arch)
+	if t.Static {
+		s += "_static"
+	}
+	return s
+}
+
+// Determine the cargo target.
+func (t Target) DetermineCargoTarget(logger *zap.Logger) string {
+	switch {
+	case t.OS == "linux" && t.Arch == "amd64" && t.Static:
+		return "x86_64-unknown-linux-musl"
+	default:
+		logger.Warn("Unable to determine cargo target. Using the default.", zap.String("target", t.String()))
+		return ""
+	}
 }
 
 type Library struct {
@@ -40,8 +56,8 @@ type Library struct {
 
 const modulePath = "github.com/influxdata/flux"
 
-func Configure(ctx context.Context, logger *zap.Logger) (*Library, error) {
-	target, err := getTarget()
+func Configure(ctx context.Context, logger *zap.Logger, static bool) (*Library, error) {
+	target, err := getTarget(static)
 	if err != nil {
 		return nil, err
 	}
@@ -75,22 +91,12 @@ func (l *Library) Install(ctx context.Context, logger *zap.Logger) error {
 		return err
 	}
 
-	var stderr bytes.Buffer
-	cargoCmd := os.Getenv("CARGO")
-	if cargoCmd == "" {
-		cargoCmd = "cargo"
-	}
-	cmd := exec.Command(cargoCmd, "build", "--release")
-	cmd.Stdout = &stderr
-	cmd.Stderr = &stderr
-	cmd.Dir = filepath.Join(l.Dir, "libflux")
-	logger.Info("Running cargo build", zap.String("dir", cmd.Dir))
-	if err := cmd.Run(); err != nil {
-		_ = logutil.LogOutput(&stderr, logger)
+	targetdir, err := l.build(ctx, logger)
+	if err != nil {
 		return err
 	}
 
-	libdir := filepath.Join(cmd.Dir, "lib", l.Target.String())
+	libdir := filepath.Join(l.Dir, "libflux", "lib", l.Target.String())
 	logger.Info("Creating libdir", zap.String("libdir", libdir))
 	if err := os.MkdirAll(libdir, 0755); err != nil {
 		return err
@@ -99,7 +105,7 @@ func (l *Library) Install(ctx context.Context, logger *zap.Logger) error {
 	libnames := []string{"flux", "libstd"}
 	for _, name := range libnames {
 		basename := fmt.Sprintf("lib%s.a", name)
-		src := filepath.Join(cmd.Dir, "target", "release", basename)
+		src := filepath.Join(targetdir, basename)
 		dst := filepath.Join(libdir, basename)
 		logger.Info("Linking library to libdir", zap.String("src", src), zap.String("dst", dst))
 		if _, err := os.Stat(dst); err == nil {
@@ -170,6 +176,32 @@ func (l *Library) copyIfReadOnly(ctx context.Context, logger *zap.Logger) error 
 	return nil
 }
 
+func (l *Library) build(ctx context.Context, logger *zap.Logger) (string, error) {
+	var stderr bytes.Buffer
+	cargoCmd := os.Getenv("CARGO")
+	if cargoCmd == "" {
+		cargoCmd = "cargo"
+	}
+
+	cmd := exec.Command(cargoCmd, "build", "--release")
+	cmd.Stdout = &stderr
+	cmd.Stderr = &stderr
+	cmd.Dir = filepath.Join(l.Dir, "libflux")
+
+	targetString := l.Target.DetermineCargoTarget(logger)
+	if targetString != "" {
+		cmd.Args = append(cmd.Args, "--target", targetString)
+	}
+	logger.Info("Executing cargo build", zap.String("dir", cmd.Dir), zap.String("target", targetString))
+	if err := cmd.Run(); err != nil {
+		logutil.LogOutput(&stderr, logger)
+		return "", err
+	}
+	targetDir := filepath.Join(cmd.Dir, "target", targetString, "release")
+	logger.Info("Build succeeded", zap.String("dir", targetDir))
+	return targetDir, nil
+}
+
 func (l *Library) WritePackageConfig(w io.Writer) error {
 	prefix := filepath.Join(l.Dir, "libflux")
 	_, _ = fmt.Fprintf(w, "prefix=%s\n", prefix)
@@ -183,7 +215,11 @@ Name: Flux
 	_, _ = fmt.Fprintf(w, "Version: %s\n", l.Version[1:])
 	_, _ = fmt.Fprintln(w, `Description: Library for the InfluxData Flux engine`)
 	if l.Target.OS == "linux" {
-		_, _ = fmt.Fprintf(w, "Libs: -L${libdir} -lflux -llibstd -ldl\n")
+		if l.Target.Static {
+			_, _ = fmt.Fprintf(w, "Libs: -L${libdir} -lflux -llibstd -ldl -lpthread\n")
+		} else {
+			_, _ = fmt.Fprintf(w, "Libs: -L${libdir} -lflux -llibstd -ldl\n")
+		}
 	} else {
 		_, _ = fmt.Fprintf(w, "Libs: -L${libdir} -lflux -llibstd\n")
 	}
@@ -341,7 +377,7 @@ func getGoCache() (string, error) {
 	return strings.TrimSpace(string(out)), nil
 }
 
-func getTarget() (Target, error) {
+func getTarget(static bool) (Target, error) {
 	goos := os.Getenv("GOOS")
 	if goos == "" {
 		cmd := exec.Command("go", "env", "GOOS")
@@ -361,5 +397,5 @@ func getTarget() (Target, error) {
 		}
 		goarch = strings.TrimSpace(string(out))
 	}
-	return Target{OS: goos, Arch: goarch}, nil
+	return Target{OS: goos, Arch: goarch, Static: static}, nil
 }
