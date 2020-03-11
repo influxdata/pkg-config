@@ -121,6 +121,7 @@ func configureLogger(logger **zap.Logger) error {
 type Flags struct {
 	Cflags bool
 	Libs   bool
+	Static bool
 }
 
 func parseFlags(name string, args []string) ([]string, Flags, error) {
@@ -128,6 +129,7 @@ func parseFlags(name string, args []string) ([]string, Flags, error) {
 	flagSet := pflag.NewFlagSet(name, pflag.ContinueOnError)
 	flagSet.BoolVar(&flags.Cflags, "cflags", false, "output all pre-processor and compiler flags")
 	flagSet.BoolVar(&flags.Libs, "libs", false, "output all linker flags")
+	flagSet.BoolVar(&flags.Static, "static", false, "output linker flags for static linking")
 	if err := flagSet.Parse(args); err != nil {
 		return nil, flags, err
 	}
@@ -135,12 +137,15 @@ func parseFlags(name string, args []string) ([]string, Flags, error) {
 }
 
 func runPkgConfig(execCmd, pkgConfigPath string, libs []string, flags Flags) error {
-	args := make([]string, 0, len(libs)+3)
+	args := make([]string, 0, len(libs)+4)
 	if flags.Cflags {
 		args = append(args, "--cflags")
 	}
 	if flags.Libs {
 		args = append(args, "--libs")
+	}
+	if flags.Static {
+		args = append(args, "--static")
 	}
 	args = append(args, "--")
 	args = append(args, libs...)
@@ -159,10 +164,10 @@ func runPkgConfig(execCmd, pkgConfigPath string, libs []string, flags Flags) err
 	return cmd.Run()
 }
 
-func getLibraryFor(ctx context.Context, name string) (Library, bool, error) {
+func getLibraryFor(ctx context.Context, name string, static bool) (Library, bool, error) {
 	switch name {
 	case "flux":
-		l, err := flux.Configure(ctx, logger)
+		l, err := flux.Configure(ctx, logger, static)
 		if err != nil {
 			return nil, true, err
 		}
@@ -210,7 +215,7 @@ func realMain() int {
 
 	// Construct the packages and write pkgconfig files to point to those packages.
 	for _, lib := range libs {
-		if l, ok, err := getLibraryFor(ctx, lib); err != nil {
+		if l, ok, err := getLibraryFor(ctx, lib, flags.Static); err != nil {
 			logger.Error("Error configuring library", zap.String("name", lib), zap.Error(err))
 			return 1
 		} else if ok {
