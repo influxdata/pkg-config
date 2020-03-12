@@ -36,11 +36,15 @@ func (t Target) String() string {
 	return s
 }
 
+const (
+	amd64LinuxMuslTarget = "x86_64-unknown-linux-musl"
+)
+
 // Determine the cargo target.
 func (t Target) DetermineCargoTarget(logger *zap.Logger) string {
 	switch {
 	case t.OS == "linux" && t.Arch == "amd64" && t.Static:
-		return "x86_64-unknown-linux-musl"
+		return amd64LinuxMuslTarget
 	default:
 		logger.Warn("Unable to determine cargo target. Using the default.", zap.String("target", t.String()))
 		return ""
@@ -187,10 +191,18 @@ func (l *Library) build(ctx context.Context, logger *zap.Logger) (string, error)
 	cmd.Stdout = &stderr
 	cmd.Stderr = &stderr
 	cmd.Dir = filepath.Join(l.Dir, "libflux")
+	cmd.Env = os.Environ()
 
 	targetString := l.Target.DetermineCargoTarget(logger)
 	if targetString != "" {
 		cmd.Args = append(cmd.Args, "--target", targetString)
+
+		// Remove CC, CXX, and AR from the environment if the target is not ourselves.
+		// These variables interfere with the rust compiler toolchain's build.rs files.
+		cmd.Env = removeEnvVar(cmd.Env, "CC")
+		cmd.Env = removeEnvVar(cmd.Env, "CXX")
+		cmd.Env = removeEnvVar(cmd.Env, "AR")
+		logger.Info("Overwrote rust build environment", zap.Strings("env", cmd.Env))
 	}
 	logger.Info("Executing cargo build", zap.String("dir", cmd.Dir), zap.String("target", targetString))
 	if err := cmd.Run(); err != nil {
@@ -398,4 +410,16 @@ func getTarget(static bool) (Target, error) {
 		goarch = strings.TrimSpace(string(out))
 	}
 	return Target{OS: goos, Arch: goarch, Static: static}, nil
+}
+
+func removeEnvVar(env []string, key string) []string {
+	prefix := key + "="
+	for i, kv := range env {
+		if strings.HasPrefix(kv, prefix) {
+			copy(env[i:], env[i+1:])
+			env = env[:len(env)-1]
+			break
+		}
+	}
+	return env
 }
