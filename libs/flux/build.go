@@ -31,6 +31,9 @@ type Target struct {
 
 func (t Target) String() string {
 	s := fmt.Sprintf("%s_%s", t.OS, t.Arch)
+	if t.Arm != "" {
+		s += "v" + t.Arm
+	}
 	if t.Static {
 		s += "_static"
 	}
@@ -421,14 +424,17 @@ func getTarget(static bool) (Target, error) {
 		goarch = strings.TrimSpace(string(out))
 	}
 
-	goarm := os.Getenv("GOARM")
-	if goarm == "" {
-		cmd := exec.Command("go", "env", "GOARM")
-		out, err := cmd.Output()
-		if err != nil {
-			return Target{}, err
+	var goarm string
+	if goarch == "arm" {
+		goarm = os.Getenv("GOARM")
+		if goarm == "" {
+			cmd := exec.Command("go", "env", "GOARM")
+			out, err := cmd.Output()
+			if err != nil {
+				return Target{}, err
+			}
+			goarm = strings.TrimSpace(string(out))
 		}
-		goarm = strings.TrimSpace(string(out))
 	}
 
 	return Target{OS: goos, Arch: goarch, Arm: goarm, Static: static}, nil
