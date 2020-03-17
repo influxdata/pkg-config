@@ -25,6 +25,7 @@ import (
 type Target struct {
 	OS     string
 	Arch   string
+	Arm    string
 	Static bool
 }
 
@@ -36,15 +37,25 @@ func (t Target) String() string {
 	return s
 }
 
-const (
-	amd64LinuxMuslTarget = "x86_64-unknown-linux-musl"
-)
-
 // Determine the cargo target.
 func (t Target) DetermineCargoTarget(logger *zap.Logger) string {
 	switch {
 	case t.OS == "linux" && t.Arch == "amd64" && t.Static:
-		return amd64LinuxMuslTarget
+		return "x86_64-unknown-linux-musl"
+	case t.OS == "linux" && t.Arch == "amd64" && !t.Static:
+		return "x86_64-unknown-linux-gnu"
+	case t.OS == "linux" && t.Arch == "386" && !t.Static:
+		return "i686-unknown-linux-gnu"
+	case t.OS == "linux" && t.Arch == "arm" && t.Arm == "6" && !t.Static:
+		return "arm-unknown-linux-gnueabihf"
+	case t.OS == "linux" && t.Arch == "arm" && t.Arm == "7" && !t.Static:
+		return "armv7-unknown-linux-gnueabihf"
+	case t.OS == "linux" && t.Arch == "arm64" && !t.Static:
+		return "armv7-unknown-linux-gnueabihf"
+	case t.OS == "darwin" && t.Arch == "amd64":
+		return "x86_64-apple-darwin"
+	case t.OS == "windows" && t.Arch == "amd64":
+		return "x86_64-pc-windows-gnu"
 	default:
 		logger.Warn("Unable to determine cargo target. Using the default.", zap.String("target", t.String()))
 		return ""
@@ -409,7 +420,18 @@ func getTarget(static bool) (Target, error) {
 		}
 		goarch = strings.TrimSpace(string(out))
 	}
-	return Target{OS: goos, Arch: goarch, Static: static}, nil
+
+	goarm := os.Getenv("GOARM")
+	if goarm == "" {
+		cmd := exec.Command("go", "env", "GOARM")
+		out, err := cmd.Output()
+		if err != nil {
+			return Target{}, err
+		}
+		goarm = strings.TrimSpace(string(out))
+	}
+
+	return Target{OS: goos, Arch: goarch, Arm: goarm, Static: static}, nil
 }
 
 func removeEnvVar(env []string, key string) []string {
