@@ -51,7 +51,7 @@ func (t Target) DetermineCargoTarget(logger *zap.Logger) string {
 	case t.OS == "linux" && t.Arch == "arm" && t.Arm == "7" && !t.Static:
 		return "armv7-unknown-linux-gnueabihf"
 	case t.OS == "linux" && t.Arch == "arm64" && !t.Static:
-		return "armv7-unknown-linux-gnueabihf"
+		return "aarch64-unknown-linux-gnueabihf"
 	case t.OS == "darwin" && t.Arch == "amd64":
 		return "x86_64-apple-darwin"
 	case t.OS == "windows" && t.Arch == "amd64":
