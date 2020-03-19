@@ -216,7 +216,6 @@ func (l *Library) build(ctx context.Context, logger *zap.Logger) (string, error)
 		cmd.Env = removeEnvVar(cmd.Env, "CC")
 		cmd.Env = removeEnvVar(cmd.Env, "CXX")
 		cmd.Env = removeEnvVar(cmd.Env, "AR")
-		logger.Info("Overwrote rust build environment", zap.Strings("env", cmd.Env))
 	}
 	logger.Info("Executing cargo build", zap.String("dir", cmd.Dir), zap.String("target", targetString))
 	if err := cmd.Run(); err != nil {
