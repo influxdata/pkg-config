@@ -70,9 +70,7 @@ func modifyPath(arg0path string) error {
 	// are in the list after our current one.
 	// We work backwards so we can find the last entry for the executable in case
 	// the same path is on the path twice.
-	var filteredList []string
-	for i := len(list) - 1; i >= 0; i-- {
-		dir := list[i]
+	for i, dir := range list {
 		if dir == "" {
 			// Unix shell semantics: path element "" means "."
 			dir = "."
@@ -80,12 +78,13 @@ func modifyPath(arg0path string) error {
 
 		dir, _ = filepath.Abs(dir)
 		path := filepath.Join(dir, pkgConfigExecName)
-		if arg0path != path {
+		if arg0path == path {
 			// Modify the list to exclude the current element and break out of the loop.
-			filteredList = append(filteredList, dir)
+			copy(list[i:], list[i+1:])
+			list = list[:len(list)-1]
 		}
 	}
-	path = strings.Join(filteredList, string(filepath.ListSeparator))
+	path = strings.Join(list, string(filepath.ListSeparator))
 	return os.Setenv("PATH", path)
 }
 
