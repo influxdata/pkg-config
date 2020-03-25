@@ -120,7 +120,7 @@ func (l *Library) Install(ctx context.Context, logger *zap.Logger) error {
 		return err
 	}
 
-	libnames := []string{"flux", "libstd"}
+	libnames := []string{"flux"}
 	for _, name := range libnames {
 		basename := fmt.Sprintf("lib%s.a", name)
 		src := filepath.Join(targetdir, basename)
@@ -241,12 +241,12 @@ Name: Flux
 	_, _ = fmt.Fprintln(w, `Description: Library for the InfluxData Flux engine`)
 	if l.Target.OS == "linux" {
 		if l.Target.Static {
-			_, _ = fmt.Fprintf(w, "Libs: -L${libdir} -lflux -llibstd -ldl -lpthread\n")
+			_, _ = fmt.Fprintf(w, "Libs: -L${libdir} -lflux -ldl -lpthread\n")
 		} else {
-			_, _ = fmt.Fprintf(w, "Libs: -L${libdir} -lflux -llibstd -ldl\n")
+			_, _ = fmt.Fprintf(w, "Libs: -L${libdir} -lflux -ldl\n")
 		}
 	} else {
-		_, _ = fmt.Fprintf(w, "Libs: -L${libdir} -lflux -llibstd\n")
+		_, _ = fmt.Fprintf(w, "Libs: -L${libdir} -lflux\n")
 	}
 	_, _ = fmt.Fprintln(w, `Cflags: -I${includedir}`)
 	return nil
