@@ -80,7 +80,9 @@ func modifyPath(arg0path string) error {
 		path := filepath.Join(dir, pkgConfigExecName)
 		if arg0path == path {
 			// Modify the list to exclude the current element and break out of the loop.
-			copy(list[i:], list[i+1:])
+			if i < len(list)-1 {
+				copy(list[i:], list[i+1:])
+			}
 			list = list[:len(list)-1]
 		}
 	}
