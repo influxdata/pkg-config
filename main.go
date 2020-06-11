@@ -24,11 +24,11 @@ const pkgConfigExecName = "pkg-config"
 type Library interface {
 	// Install will be used to build and install the library into
 	// the directory.
-	Install(ctx context.Context, l *zap.Logger) error
+	Install(ctx context.Context, l *zap.Logger) (string, error)
 
 	// WritePackageConfig will write out the package configuration
 	// for this library to the given writer.
-	WritePackageConfig(w io.Writer) error
+	WritePackageConfig(w io.Writer, buildid string) error
 }
 
 // getArg0Path gets an absolute path to where this binary was executed.
@@ -220,7 +220,8 @@ func realMain() int {
 			logger.Error("Error configuring library", zap.String("name", lib), zap.Error(err))
 			return 1
 		} else if ok {
-			if err := l.Install(ctx, logger); err != nil {
+			buildid, err := l.Install(ctx, logger)
+			if err != nil {
 				logger.Error("Error installing library", zap.String("name", lib), zap.Error(err))
 				return 1
 			}
@@ -232,7 +233,7 @@ func realMain() int {
 				return 1
 			}
 
-			if err := l.WritePackageConfig(f); err != nil {
+			if err := l.WritePackageConfig(f, buildid); err != nil {
 				logger.Error("Error writing pkg-config configuration file", zap.String("path", pkgfile), zap.Error(err))
 				return 1
 			}
