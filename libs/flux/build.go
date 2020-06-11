@@ -3,6 +3,8 @@ package flux
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -104,37 +106,56 @@ func Configure(ctx context.Context, logger *zap.Logger, static bool) (*Library, 
 	}, nil
 }
 
-func (l *Library) Install(ctx context.Context, logger *zap.Logger) error {
+func (l *Library) Install(ctx context.Context, logger *zap.Logger) (string, error) {
 	if err := l.copyIfReadOnly(ctx, logger); err != nil {
-		return err
+		return "", err
 	}
 
 	targetdir, err := l.build(ctx, logger)
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	libdir := filepath.Join(l.Dir, "libflux", "lib", l.Target.String())
 	logger.Info("Creating libdir", zap.String("libdir", libdir))
 	if err := os.MkdirAll(libdir, 0755); err != nil {
-		return err
+		return "", err
 	}
 
 	libnames := []string{"flux"}
+	buildid, err := l.determineBuildId(targetdir, libnames)
+	if err != nil {
+		return "", err
+	}
+
 	for _, name := range libnames {
 		basename := fmt.Sprintf("lib%s.a", name)
 		src := filepath.Join(targetdir, basename)
-		dst := filepath.Join(libdir, basename)
+		dst := filepath.Join(libdir, fmt.Sprintf("lib%s-%s.a", name, buildid))
 		logger.Info("Linking library to libdir", zap.String("src", src), zap.String("dst", dst))
 		if _, err := os.Stat(dst); err == nil {
 			_ = os.Remove(dst)
 		}
 
 		if err := os.Link(src, dst); err != nil {
-			return err
+			return "", err
 		}
 	}
-	return nil
+	return buildid, nil
+}
+
+func (l *Library) determineBuildId(targetdir string, libnames []string) (string, error) {
+	shasum := sha256.New()
+	for _, name := range libnames {
+		basename := fmt.Sprintf("lib%s.a", name)
+		src := filepath.Join(targetdir, basename)
+		data, err := ioutil.ReadFile(src)
+		if err != nil {
+			return "", err
+		}
+		shasum.Write(data)
+	}
+	return hex.EncodeToString(shasum.Sum(nil)), nil
 }
 
 // copyIfReadOnly will copy the module to another location if the directory is read only.
@@ -235,10 +256,11 @@ func (l *Library) build(ctx context.Context, logger *zap.Logger) (string, error)
 	return targetDir, nil
 }
 
-func (l *Library) WritePackageConfig(w io.Writer) error {
+func (l *Library) WritePackageConfig(w io.Writer, buildid string) error {
 	prefix := filepath.Join(l.Dir, "libflux")
 	_, _ = fmt.Fprintf(w, "prefix=%s\n", prefix)
 	_, _ = fmt.Fprintf(w, "target=%s\n", l.Target)
+	_, _ = fmt.Fprintf(w, "buildid=%s\n", buildid)
 	_, _ = io.WriteString(w, `exec_prefix=${prefix}
 libdir=${exec_prefix}/lib/${target}
 includedir=${prefix}/include
@@ -249,12 +271,12 @@ Name: Flux
 	_, _ = fmt.Fprintln(w, `Description: Library for the InfluxData Flux engine`)
 	if l.Target.OS == "linux" {
 		if l.Target.Static {
-			_, _ = fmt.Fprintf(w, "Libs: -L${libdir} -lflux -ldl -lpthread\n")
+			_, _ = fmt.Fprintf(w, "Libs: -L${libdir} -lflux-${buildid} -ldl -lpthread\n")
 		} else {
-			_, _ = fmt.Fprintf(w, "Libs: -L${libdir} -lflux -ldl\n")
+			_, _ = fmt.Fprintf(w, "Libs: -L${libdir} -lflux-${buildid} -ldl\n")
 		}
 	} else {
-		_, _ = fmt.Fprintf(w, "Libs: -L${libdir} -lflux\n")
+		_, _ = fmt.Fprintf(w, "Libs: -L${libdir} -lflux-${buildid}\n")
 	}
 	_, _ = fmt.Fprintln(w, `Cflags: -I${includedir}`)
 	return nil
