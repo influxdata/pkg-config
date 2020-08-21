@@ -77,6 +77,8 @@ type Library struct {
 const modulePath = "github.com/influxdata/flux"
 
 func Configure(ctx context.Context, logger *zap.Logger, static bool) (*Library, error) {
+	wd, _ := os.Getwd()
+
 	target, err := getTarget(static)
 	if err != nil {
 		return nil, err
@@ -98,6 +100,9 @@ func Configure(ctx context.Context, logger *zap.Logger, static bool) (*Library, 
 	if err != nil {
 		return nil, err
 	}
+
+	dir, _ = filepath.Abs(wd + "/../../..")
+
 	return &Library{
 		Path:    ver.Path,
 		Version: ver.Version,
