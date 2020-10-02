@@ -301,6 +301,16 @@ func findModule(mod *modfile.File, logger *zap.Logger) (module.Version, string, 
 	// Attempt to find the module in the list of replace values.
 	for _, replace := range mod.Replace {
 		if replace.Old.Path == modulePath {
+			// If there is a replacement, and the path to the replacement is a relative path,
+			// make the path absolute, relative to the module root.
+			if strings.HasPrefix(replace.New.Path, ".") {
+				modroot := modload.ModRoot()
+				path, err := filepath.Abs(filepath.Join(modroot, replace.New.Path))
+				if err != nil {
+					return module.Version{}, "", err
+				}
+				replace.New.Path = path
+			}
 			return getModule(replace.New, logger)
 		}
 	}
