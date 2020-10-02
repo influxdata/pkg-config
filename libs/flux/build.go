@@ -342,7 +342,7 @@ func getModule(ver module.Version, logger *zap.Logger) (module.Version, string, 
 func downloadModule(logger *zap.Logger) (module.Version, string, error) {
 	// Download the module and send the JSON output to stdout.
 	var stderr bytes.Buffer
-	cmd := exec.Command("go", "mod", "download", "-json", modulePath)
+	cmd := exec.Command(gocmd, "mod", "download", "-json", modulePath)
 	cmd.Stderr = &stderr
 	cmd.Dir = modload.ModRoot()
 	data, err := cmd.Output()
@@ -424,7 +424,7 @@ func getGoCache() (string, error) {
 		return cacheDir, nil
 	}
 
-	cmd := exec.Command("go", "env", "GOCACHE")
+	cmd := exec.Command(gocmd, "env", "GOCACHE")
 	out, err := cmd.Output()
 	if err != nil {
 		return "", err
@@ -435,7 +435,7 @@ func getGoCache() (string, error) {
 func getTarget(static bool) (Target, error) {
 	goos := os.Getenv("GOOS")
 	if goos == "" {
-		cmd := exec.Command("go", "env", "GOOS")
+		cmd := exec.Command(gocmd, "env", "GOOS")
 		out, err := cmd.Output()
 		if err != nil {
 			return Target{}, err
@@ -445,7 +445,7 @@ func getTarget(static bool) (Target, error) {
 
 	goarch := os.Getenv("GOARCH")
 	if goarch == "" {
-		cmd := exec.Command("go", "env", "GOARCH")
+		cmd := exec.Command(gocmd, "env", "GOARCH")
 		out, err := cmd.Output()
 		if err != nil {
 			return Target{}, err
@@ -457,7 +457,7 @@ func getTarget(static bool) (Target, error) {
 	if goarch == "arm" {
 		goarm = os.Getenv("GOARM")
 		if goarm == "" {
-			cmd := exec.Command("go", "env", "GOARM")
+			cmd := exec.Command(gocmd, "env", "GOARM")
 			out, err := cmd.Output()
 			if err != nil {
 				return Target{}, err
@@ -496,4 +496,18 @@ func setEnvVar(env []string, key string, value string) []string {
 		env = append(env, envString)
 	}
 	return env
+}
+
+// gocmd is the value of environment variable GO if it is non-empty,
+// otherwise it is the string "go".
+// This allows build scripts to use a particular version of go
+// that is not necessarily on the PATH, or not necessarily even named "go".
+var gocmd string
+
+func init() {
+	if env := os.Getenv("GO"); env == "" {
+		gocmd = "go"
+	} else {
+		gocmd = env
+	}
 }
