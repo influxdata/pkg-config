@@ -107,7 +107,15 @@ func Configure(ctx context.Context, logger *zap.Logger, static bool) (*Library, 
 }
 
 func (l *Library) Install(ctx context.Context, logger *zap.Logger) (string, error) {
-	if err := l.copyIfReadOnly(ctx, logger); err != nil {
+	// Find the go cache as this is a safe place for us to write files.
+	cache, err := getGoCache()
+	if err != nil {
+		return "", err
+	}
+
+	// If the sources are read only (so we can't write build products
+	// to the same directory), copy the sources to another location.
+	if err := l.copyIfReadOnly(ctx, logger, cache); err != nil {
 		return "", err
 	}
 
@@ -116,7 +124,7 @@ func (l *Library) Install(ctx context.Context, logger *zap.Logger) (string, erro
 		return "", err
 	}
 
-	libdir := filepath.Join(l.Dir, "libflux", "lib", l.Target.String())
+	libdir := filepath.Join(cache, "pkgconfig", l.Target.String(), "lib")
 	logger.Info("Creating libdir", zap.String("libdir", libdir))
 	if err := os.MkdirAll(libdir, 0755); err != nil {
 		return "", err
@@ -137,7 +145,8 @@ func (l *Library) Install(ctx context.Context, logger *zap.Logger) (string, erro
 			_ = os.Remove(dst)
 		}
 
-		if err := os.Link(src, dst); err != nil {
+		if err := safeLink(src, dst); err != nil {
+			logger.Error("Could not link library", zap.Error(err))
 			return "", err
 		}
 	}
@@ -159,17 +168,11 @@ func (l *Library) determineBuildId(targetdir string, libnames []string) (string,
 }
 
 // copyIfReadOnly will copy the module to another location if the directory is read only.
-func (l *Library) copyIfReadOnly(ctx context.Context, logger *zap.Logger) error {
+func (l *Library) copyIfReadOnly(ctx context.Context, logger *zap.Logger, cache string) error {
 	if st, err := os.Stat(l.Dir); err != nil {
 		return err
 	} else if st.Mode()&0200 != 0 {
 		return nil
-	}
-
-	// Find the go cache as this is a safe place for us to copy the sources to.
-	cache, err := getGoCache()
-	if err != nil {
-		return err
 	}
 
 	// Determine the source path. If the directory already exists,
@@ -257,12 +260,19 @@ func (l *Library) build(ctx context.Context, logger *zap.Logger) (string, error)
 }
 
 func (l *Library) WritePackageConfig(w io.Writer, buildid string) error {
-	prefix := filepath.Join(l.Dir, "libflux")
+	cache, err := getGoCache()
+	if err != nil {
+		return err
+	}
+
+	var (
+		prefix     = filepath.Join(l.Dir, "libflux")
+		execPrefix = filepath.Join(cache, "pkgconfig", l.Target.String())
+	)
 	_, _ = fmt.Fprintf(w, "prefix=%s\n", prefix)
-	_, _ = fmt.Fprintf(w, "target=%s\n", l.Target)
+	_, _ = fmt.Fprintf(w, "exec_prefix=%s\n", execPrefix)
 	_, _ = fmt.Fprintf(w, "buildid=%s\n", buildid)
-	_, _ = io.WriteString(w, `exec_prefix=${prefix}
-libdir=${exec_prefix}/lib/${target}
+	_, _ = io.WriteString(w, `libdir=${exec_prefix}/lib
 includedir=${prefix}/include
 
 Name: Flux
@@ -506,6 +516,30 @@ func setEnvVar(env []string, key string, value string) []string {
 		env = append(env, envString)
 	}
 	return env
+}
+
+// safeLink will safely link or copy the file from src to dst.
+func safeLink(src, dst string) error {
+	if err := os.Link(src, dst); err == nil {
+		return nil
+	}
+
+	srcf, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = srcf.Close() }()
+
+	dstf, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = dstf.Close() }()
+
+	if _, err := io.Copy(dstf, srcf); err != nil {
+		return err
+	}
+	return dstf.Close()
 }
 
 // gocmd is the value of environment variable GO if it is non-empty,
