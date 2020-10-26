@@ -6,7 +6,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -386,7 +385,7 @@ func getVersion(dir string, logger *zap.Logger) (string, error) {
 		return v, nil
 	}
 	logger.Info("Using default version")
-	return "", errors.New("unable to determine flux repository version")
+	return "v0.0.0", nil
 }
 
 func getVersionFromPath(dir string) (string, error) {
