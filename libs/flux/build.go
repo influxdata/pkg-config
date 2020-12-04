@@ -239,20 +239,6 @@ func (l *Library) build(ctx context.Context, logger *zap.Logger) (string, error)
 	targetString := l.Target.DetermineCargoTarget(logger)
 	if targetString != "" {
 		cmd.Args = append(cmd.Args, "--target", targetString)
-
-		// If the target environment is not also the host environment, CC set to "xcc" will
-		// be incorrect, and will interfere with build time compilation. For linux, unsetting the
-		// value is fine, as rust will correctly assume gcc. For macOS, however, we must explicitly
-		// set CC to clang.
-		if l.Target.OS == "darwin" {
-			cmd.Env = setEnvVar(cmd.Env, "CC", "clang")
-		} else if l.Target.OS == "linux" {
-			// Remove CC, CXX, and AR from the environment if the target is not ourselves.
-			// These variables interfere with the rust compiler toolchain's build.rs files.
-			cmd.Env = removeEnvVar(cmd.Env, "CC")
-			cmd.Env = removeEnvVar(cmd.Env, "CXX")
-			cmd.Env = removeEnvVar(cmd.Env, "AR")
-		}
 	}
 	logger.Info("Executing cargo build", zap.String("dir", cmd.Dir), zap.String("target", targetString))
 	if err := cmd.Run(); err != nil {
@@ -492,35 +478,6 @@ func getTarget(static bool) (Target, error) {
 	}
 
 	return Target{OS: goos, Arch: goarch, Arm: goarm, Static: static}, nil
-}
-
-func removeEnvVar(env []string, key string) []string {
-	prefix := key + "="
-	for i, kv := range env {
-		if strings.HasPrefix(kv, prefix) {
-			copy(env[i:], env[i+1:])
-			env = env[:len(env)-1]
-			break
-		}
-	}
-	return env
-}
-
-func setEnvVar(env []string, key string, value string) []string {
-	found := false
-	prefix := key + "="
-	envString := prefix + value
-	for i, kv := range env {
-		if strings.HasPrefix(kv, prefix) {
-			found = true
-			env[i] = envString
-			break
-		}
-	}
-	if !found {
-		env = append(env, envString)
-	}
-	return env
 }
 
 // safeLink will safely link or copy the file from src to dst.
