@@ -276,6 +276,8 @@ Name: Flux
 		} else {
 			_, _ = fmt.Fprintf(w, "Libs: -L${libdir} -lflux-${buildid} -ldl\n")
 		}
+	} else if l.Target.OS == "windows" {
+		_, _ = fmt.Fprintf(w, "Libs: -L${libdir} -lflux-${buildid} -lws2_32 -luserenv\n")
 	} else {
 		_, _ = fmt.Fprintf(w, "Libs: -L${libdir} -lflux-${buildid}\n")
 	}
