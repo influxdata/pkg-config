@@ -17,8 +17,6 @@ import (
 	"go.uber.org/zap/zapcore"
 )
 
-const pkgConfigExecName = "pkg-config"
-
 // Library is the interface for building and installing a library
 // for use by package config.
 type Library interface {
@@ -34,7 +32,7 @@ type Library interface {
 // getArg0Path gets an absolute path to where this binary was executed.
 func getArg0Path() string {
 	arg0 := os.Args[0]
-	if strings.Contains(arg0, "/") {
+	if strings.Contains(arg0, string(os.PathSeparator)) {
 		return arg0
 	}
 

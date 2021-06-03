@@ -37,7 +37,7 @@ func HasModRoot() bool {
 				modRoot = vendorRoot
 			}
 			return true
-		} else if cwd == "/" {
+		} else if cwd[len(cwd)-1] == os.PathSeparator {
 			return false
 		}
 		cwd = filepath.Dir(cwd)
@@ -49,7 +49,9 @@ func HasModRoot() bool {
 // of a vendor directory.
 func findVendorMod(cwd string) (string, bool) {
 	cwd = filepath.Dir(cwd)
-	for cwd != "/" {
+	// According to its godoc, the return value for `filepath.Dir` will
+	// only end in a path separator when it's the root directory.
+	for cwd[len(cwd)-1] != os.PathSeparator {
 		modPath := filepath.Join(cwd, "go.mod")
 		if _, err := os.Stat(modPath); err == nil {
 			vendorPath := filepath.Join(cwd, "vendor")
