@@ -1,3 +1,5 @@
 package flux
 
-const fluxVersionRegexp = `/github\.com\\\\influxdata\\\\flux@(v\d+\.\d+\.\d+.*)$`
+import "regexp"
+
+var fluxVersionRegexp = regexp.MustCompile(`\\github\.com\\influxdata\\flux@(v\d+\.\d+\.\d+.*)$`)
