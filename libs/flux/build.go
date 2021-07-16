@@ -262,14 +262,14 @@ func (l *Library) WritePackageConfig(w io.Writer, buildid string) error {
 		prefix     = filepath.Join(l.Dir, "libflux")
 		execPrefix = filepath.Join(cache, "pkgconfig", l.Target.String())
 	)
-	_, _ = fmt.Fprintf(w, "prefix=%s\n", prefix)
-	_, _ = fmt.Fprintf(w, "exec_prefix=%s\n", execPrefix)
+	_, _ = fmt.Fprintf(w, "prefix=%s\n", strings.ReplaceAll(prefix, string(os.PathSeparator), pcSep))
+	_, _ = fmt.Fprintf(w, "exec_prefix=%s\n", strings.ReplaceAll(execPrefix, string(os.PathSeparator), pcSep))
 	_, _ = fmt.Fprintf(w, "buildid=%s\n", buildid)
-	_, _ = io.WriteString(w, `libdir=${exec_prefix}/lib
-includedir=${prefix}/include
+	_, _ = io.WriteString(w, fmt.Sprintf(`libdir=${exec_prefix}%[1]slib
+includedir=${prefix}%[1]sinclude
 
 Name: Flux
-`)
+`, pcSep))
 	_, _ = fmt.Fprintf(w, "Version: %s\n", l.Version[1:])
 	_, _ = fmt.Fprintln(w, `Description: Library for the InfluxData Flux engine`)
 	if l.Target.OS == "linux" {
@@ -395,7 +395,7 @@ func getVersion(dir string, logger *zap.Logger) (string, error) {
 }
 
 func getVersionFromPath(dir string) (string, error) {
-	reModulePath := regexp.MustCompile(`/github\.com/influxdata\/flux@(v\d+\.\d+\.\d+.*)$`)
+	reModulePath := fluxVersionRegexp
 	m := reModulePath.FindStringSubmatch(dir)
 	if m == nil {
 		return "", fmt.Errorf("directory path did not match the module pattern: %s", dir)
