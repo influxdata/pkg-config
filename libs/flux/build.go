@@ -242,6 +242,11 @@ func (l *Library) build(ctx context.Context, logger *zap.Logger) (string, error)
 	if targetString != "" {
 		cmd.Args = append(cmd.Args, "--target", targetString)
 	}
+
+	if l.Target.OS == "linux" {
+		cmd.Args = append(cmd.Args, "-lm")
+	}
+
 	logger.Info("Executing cargo build", zap.String("dir", cmd.Dir), zap.String("target", targetString))
 	if err := cmd.Run(); err != nil {
 		logutil.LogOutput(&stderr, logger)
