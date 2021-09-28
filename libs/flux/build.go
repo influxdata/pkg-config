@@ -243,10 +243,6 @@ func (l *Library) build(ctx context.Context, logger *zap.Logger) (string, error)
 		cmd.Args = append(cmd.Args, "--target", targetString)
 	}
 
-	if l.Target.OS == "linux" {
-		cmd.Args = append(cmd.Args, "-lm")
-	}
-
 	logger.Info("Executing cargo build", zap.String("dir", cmd.Dir), zap.String("target", targetString))
 	if err := cmd.Run(); err != nil {
 		logutil.LogOutput(&stderr, logger)
@@ -279,9 +275,9 @@ Name: Flux
 	_, _ = fmt.Fprintln(w, `Description: Library for the InfluxData Flux engine`)
 	if l.Target.OS == "linux" {
 		if l.Target.Static {
-			_, _ = fmt.Fprintf(w, "Libs: -L${libdir} -lflux-${buildid} -ldl -lpthread\n")
+			_, _ = fmt.Fprintf(w, "Libs: -L${libdir} -lflux-${buildid} -ldl -lpthread -lm\n")
 		} else {
-			_, _ = fmt.Fprintf(w, "Libs: -L${libdir} -lflux-${buildid} -ldl\n")
+			_, _ = fmt.Fprintf(w, "Libs: -L${libdir} -lflux-${buildid} -ldl -lm\n")
 		}
 	} else if l.Target.OS == "windows" {
 		_, _ = fmt.Fprintf(w, "Libs: -L${libdir} -lflux-${buildid} -lws2_32 -luserenv\n")
