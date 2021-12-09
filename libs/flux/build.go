@@ -66,6 +66,8 @@ func (t Target) DetermineCargoTarget(logger *zap.Logger) string {
 		return "s390x-unknown-linux-gnu"
 	case t.OS == "darwin" && t.Arch == "amd64":
 		return "x86_64-apple-darwin"
+	case t.OS == "darwin" && t.Arch == "arm64":
+		return "aarch64-apple-darwin"
 	case t.OS == "windows" && t.Arch == "amd64":
 		return "x86_64-pc-windows-gnu"
 	default:
