@@ -118,9 +118,10 @@ func configureLogger(logger **zap.Logger) error {
 }
 
 type Flags struct {
-	Cflags bool
-	Libs   bool
-	Static bool
+	Cflags     bool
+	Libs       bool
+	Static     bool
+	ModVersion string
 }
 
 func parseFlags(name string, args []string) ([]string, Flags, error) {
@@ -129,6 +130,7 @@ func parseFlags(name string, args []string) ([]string, Flags, error) {
 	flagSet.BoolVar(&flags.Cflags, "cflags", false, "output all pre-processor and compiler flags")
 	flagSet.BoolVar(&flags.Libs, "libs", false, "output all linker flags")
 	flagSet.BoolVar(&flags.Static, "static", false, "output linker flags for static linking")
+	flagSet.StringVar(&flags.ModVersion, "modversion", "", "output version for package")
 	if err := flagSet.Parse(args); err != nil {
 		return nil, flags, err
 	}
@@ -137,17 +139,25 @@ func parseFlags(name string, args []string) ([]string, Flags, error) {
 
 func runPkgConfig(execCmd, pkgConfigPath string, libs []string, flags Flags) error {
 	args := make([]string, 0, len(libs)+4)
-	if flags.Cflags {
-		args = append(args, "--cflags")
+
+	// The modversion flag will report the versions of a comma separated list of
+	// package names, making it mutually exclusive to the various linking flags.
+	if len(flags.ModVersion) > 0 {
+		args = append(args, "--modversion")
+		args = append(args, flags.ModVersion)
+	} else {
+		if flags.Cflags {
+			args = append(args, "--cflags")
+		}
+		if flags.Libs {
+			args = append(args, "--libs")
+		}
+		if flags.Static {
+			args = append(args, "--static")
+		}
+		args = append(args, "--")
+		args = append(args, libs...)
 	}
-	if flags.Libs {
-		args = append(args, "--libs")
-	}
-	if flags.Static {
-		args = append(args, "--static")
-	}
-	args = append(args, "--")
-	args = append(args, libs...)
 
 	pathEnv := os.Getenv("PKG_CONFIG_PATH")
 	if pathEnv != "" {
