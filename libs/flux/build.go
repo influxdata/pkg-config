@@ -83,7 +83,7 @@ type Library struct {
 	Target  Target
 }
 
-const modulePath = "github.com/influxdata/flux"
+var modulePathPattern = regexp.MustCompile("github.com/([^/]+)/flux")
 
 func Configure(ctx context.Context, logger *zap.Logger, static bool) (*Library, error) {
 	target, err := getTarget(static)
@@ -290,10 +290,19 @@ Name: Flux
 	return nil
 }
 
+func getModulePath(path string) string {
+	// Flux may be either in "influxdata", the "InfluxCommunity" fork, or somewhere else.
+	if matches := modulePathPattern.FindStringSubmatch(path); len(matches) == 2 {
+		return fmt.Sprintf("github.com/%v/flux", matches[1])
+	}
+	return ""
+}
+
 // findModule will find the module in the module file and instantiate
 // a module.Version that points to a local copy of the module.
 func findModule(mod *modfile.File, logger *zap.Logger) (module.Version, string, error) {
-	if mod.Module.Mod.Path == modulePath {
+	logger.Info("finding module", zap.String("modfile", fmt.Sprintf("%+v", mod.Module.Syntax.Token)))
+	if modulePath := getModulePath(mod.Module.Mod.Path); len(modulePath) != 0 {
 		modroot := modload.ModRoot()
 		logger.Info("Flux module is the main module", zap.String("modroot", modroot))
 		v, err := getVersion(modroot, logger)
@@ -308,7 +317,7 @@ func findModule(mod *modfile.File, logger *zap.Logger) (module.Version, string, 
 
 	// Attempt to find the module in the list of replace values.
 	for _, replace := range mod.Replace {
-		if replace.Old.Path == modulePath {
+		if modulePath := getModulePath(replace.Old.Path); len(modulePath) > 0 {
 			// If there is a replacement, and the path to the replacement is a relative path,
 			// make the path absolute, relative to the module root.
 			if strings.HasPrefix(replace.New.Path, ".") {
@@ -319,21 +328,21 @@ func findModule(mod *modfile.File, logger *zap.Logger) (module.Version, string, 
 				}
 				replace.New.Path = path
 			}
-			return getModule(replace.New, logger)
+			return getModule(replace.New, modulePath, logger)
 		}
 	}
 
 	// Attempt to find the module in the normal dependencies.
 	for _, m := range mod.Require {
-		if m.Mod.Path == modulePath {
-			return getModule(m.Mod, logger)
+		if modulePath := getModulePath(m.Mod.Path); len(modulePath) > 0 {
+			return getModule(m.Mod, modulePath, logger)
 		}
 	}
-	return module.Version{}, "", fmt.Errorf("could not find %s module", modulePath)
+	return module.Version{}, "", fmt.Errorf("could not find module matching %s", modulePathPattern)
 }
 
 // getModule will retrieve or copy the module sources to the go build cache.
-func getModule(ver module.Version, logger *zap.Logger) (module.Version, string, error) {
+func getModule(ver module.Version, modulePath string, logger *zap.Logger) (module.Version, string, error) {
 	if strings.HasPrefix(ver.Path, "/") || strings.HasPrefix(ver.Path, ".") {
 		// We are dealing with a filepath meaning we are building from the filesystem.
 		// If this is the case, this is the same as building from the main module.
@@ -353,11 +362,11 @@ func getModule(ver module.Version, logger *zap.Logger) (module.Version, string, 
 	// This references a module. Use go mod download to download the module.
 	// We use go mod download specifically to avoid downloading extra dependencies.
 	// This should work properly even if vendor was used for the dependencies.
-	return downloadModule(logger)
+	return downloadModule(modulePath, logger)
 }
 
 // downloadModule will download the module to a file path.
-func downloadModule(logger *zap.Logger) (module.Version, string, error) {
+func downloadModule(modulePath string, logger *zap.Logger) (module.Version, string, error) {
 	// Download the module and send the JSON output to stdout.
 	var stderr bytes.Buffer
 	cmd := exec.Command(gocmd, "mod", "download", "-json", modulePath)
