@@ -201,7 +201,7 @@ func realMain() int {
 	}
 	pkgConfigExec, err := exec.LookPath("pkg-config")
 	if err != nil {
-		logger.Error("Could not find pkg-config executable", zap.String("path", os.Getenv("PATH")), zap.Error(err))
+		logger.Error("Could not find pkg-config executable. Please make sure you have https://www.freedesktop.org/wiki/Software/pkg-config/ installed. This is not InfluxData's pkg-config!", zap.String("path", os.Getenv("PATH")), zap.Error(err))
 		return 1
 	}
 	logger.Info("Found pkg-config executable", zap.String("path", pkgConfigExec))
