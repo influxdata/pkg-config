@@ -15,7 +15,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/Masterminds/semver"
+	"github.com/Masterminds/semver/v3"
 	"go.uber.org/zap"
 	"golang.org/x/mod/modfile"
 	"golang.org/x/mod/module"
