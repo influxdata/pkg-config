@@ -16,11 +16,12 @@ import (
 	"strings"
 
 	"github.com/Masterminds/semver"
-	"github.com/influxdata/pkg-config/internal/logutil"
-	"github.com/influxdata/pkg-config/internal/modfile"
-	"github.com/influxdata/pkg-config/internal/modload"
-	"github.com/influxdata/pkg-config/internal/module"
 	"go.uber.org/zap"
+	"golang.org/x/mod/modfile"
+	"golang.org/x/mod/module"
+
+	"github.com/influxdata/pkg-config/internal/logutil"
+	"github.com/influxdata/pkg-config/internal/modload"
 )
 
 type Target struct {
