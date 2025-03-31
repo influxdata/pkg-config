@@ -5,7 +5,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -215,7 +214,7 @@ func realMain() int {
 
 	// Construct a temporary path where we will place all of the generated
 	// pkgconfig files.
-	pkgConfigPath, err := ioutil.TempDir("", "pkgconfig")
+	pkgConfigPath, err := os.MkdirTemp("", "pkgconfig")
 	if err != nil {
 		logger.Error("Unable to create temporary directory for pkgconfig files", zap.Error(err))
 		return 1
