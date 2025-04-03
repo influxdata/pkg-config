@@ -8,19 +8,19 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
 
-	"github.com/Masterminds/semver"
-	"github.com/influxdata/pkg-config/internal/logutil"
-	"github.com/influxdata/pkg-config/internal/modfile"
-	"github.com/influxdata/pkg-config/internal/modload"
-	"github.com/influxdata/pkg-config/internal/module"
+	"github.com/Masterminds/semver/v3"
 	"go.uber.org/zap"
+	"golang.org/x/mod/modfile"
+	"golang.org/x/mod/module"
+
+	"github.com/influxdata/pkg-config/internal/logutil"
+	"github.com/influxdata/pkg-config/internal/modload"
 )
 
 type Target struct {
@@ -93,7 +93,7 @@ func Configure(ctx context.Context, logger *zap.Logger, static bool) (*Library, 
 
 	modroot := modload.ModRoot()
 	logger.Info("Determined module root", zap.String("path", modroot))
-	data, err := ioutil.ReadFile(filepath.Join(modroot, "go.mod"))
+	data, err := os.ReadFile(filepath.Join(modroot, "go.mod"))
 	if err != nil {
 		return nil, err
 	}
@@ -167,7 +167,7 @@ func (l *Library) determineBuildId(targetdir string, libnames []string) (string,
 	for _, name := range libnames {
 		basename := fmt.Sprintf("lib%s.a", name)
 		src := filepath.Join(targetdir, basename)
-		data, err := ioutil.ReadFile(src)
+		data, err := os.ReadFile(src)
 		if err != nil {
 			return "", err
 		}
@@ -193,7 +193,7 @@ func (l *Library) copyIfReadOnly(ctx context.Context, logger *zap.Logger, cache 
 	}
 
 	// Copy over the directory.
-	if err := filepath.Walk(l.Dir, func(path string, info os.FileInfo, err error) error {
+	if err := filepath.Walk(l.Dir, func(path string, info os.FileInfo, _ error) error {
 		relpath, err := filepath.Rel(l.Dir, path)
 		if err != nil {
 			return err

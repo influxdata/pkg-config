@@ -1,12 +1,14 @@
 module github.com/influxdata/pkg-config
 
-go 1.12
+go 1.23.0
+
+toolchain go1.24.1
 
 require (
-	github.com/Masterminds/semver v1.4.2
-	github.com/pkg/errors v0.9.1 // indirect
-	github.com/spf13/pflag v1.0.3
-	go.uber.org/atomic v1.5.1 // indirect
-	go.uber.org/multierr v1.4.0 // indirect
-	go.uber.org/zap v1.9.1
+	github.com/Masterminds/semver/v3 v3.3.1
+	github.com/spf13/pflag v1.0.6
+	go.uber.org/zap v1.27.0
+	golang.org/x/mod v0.24.0
 )
+
+require go.uber.org/multierr v1.10.0 // indirect
