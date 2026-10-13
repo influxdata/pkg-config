@@ -281,6 +281,11 @@ Name: Flux
 		} else {
 			_, _ = fmt.Fprintf(w, "Libs: -L${libdir} -lflux-${buildid} -ldl -lm\n")
 		}
+	} else if l.Target.OS == "darwin" {
+		// The native libraries that the Rust static library needs on macOS.
+		// These are reported by "cargo rustc -- --print native-static-libs".
+		// libSystem (which provides libc and libm) is linked implicitly.
+		_, _ = fmt.Fprintf(w, "Libs: -L${libdir} -lflux-${buildid} -liconv -framework CoreFoundation\n")
 	} else if l.Target.OS == "windows" {
 		_, _ = fmt.Fprintf(w, "Libs: -L${libdir} -lflux-${buildid} -lkernel32 -ladvapi32 -lbcrypt -lkernel32 -lntdll -luserenv -lws2_32 -lkernel32 -lws2_32 -lkernel32 -lntdll -lkernel32\n")
 	} else {
