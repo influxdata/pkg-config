@@ -133,41 +133,87 @@ func (l *Library) Install(ctx context.Context, logger *zap.Logger) (string, erro
 		return "", err
 	}
 
+	// Archives are installed into a directory of their own, named after
+	// the build id, rather than directly into libdir. The go command
+	// inspects every archive in a -L directory, not just the one that is
+	// linked, so a stale archive there (in particular one from before LTO
+	// sections were stripped) would fail every subsequent build.
 	libdir := filepath.Join(cache, "pkgconfig", l.Target.String(), "lib")
 	logger.Info("Creating libdir", zap.String("libdir", libdir))
 	if err := os.MkdirAll(libdir, 0755); err != nil {
 		return "", err
 	}
 
-	libnames := []string{"flux"}
-	buildid, err := l.determineBuildId(targetdir, libnames)
+	objcopy, err := findObjcopy(ctx, logger, filepath.Join(l.Dir, "libflux"), l.Target)
 	if err != nil {
 		return "", err
 	}
 
-	for _, name := range libnames {
-		basename := fmt.Sprintf("lib%s.a", name)
-		src := filepath.Join(targetdir, basename)
-		dst := filepath.Join(libdir, fmt.Sprintf("lib%s-%s.a", name, buildid))
-		logger.Info("Linking library to libdir", zap.String("src", src), zap.String("dst", dst))
-		if _, err := os.Stat(dst); err == nil {
-			_ = os.Remove(dst)
+	// Strip the LTO sections from each archive into a temporary file
+	// in libdir. The build id is a hash of the stripped archives, so it
+	// can only be known once this is done.
+	libnames := []string{"flux"}
+	stripped := make([]string, 0, len(libnames))
+	defer func() {
+		// Anything not moved into place is left over from a failure.
+		for _, path := range stripped {
+			_ = os.Remove(path)
 		}
+	}()
+	for _, name := range libnames {
+		src := filepath.Join(targetdir, fmt.Sprintf("lib%s.a", name))
+		f, err := os.CreateTemp(libdir, fmt.Sprintf("lib%s-*.a.tmp", name))
+		if err != nil {
+			return "", err
+		}
+		tmp := f.Name()
+		_ = f.Close()
+		stripped = append(stripped, tmp)
 
-		if err := safeLink(src, dst); err != nil {
-			logger.Error("Could not link library", zap.Error(err))
+		if err := stripLTOSections(ctx, logger, objcopy, src, tmp, l.Target); err != nil {
+			logger.Error("Could not strip LTO sections from library", zap.Error(err))
+			return "", err
+		}
+	}
+
+	buildid, err := determineBuildId(stripped)
+	if err != nil {
+		return "", err
+	}
+
+	builddir := filepath.Join(libdir, buildid)
+	if err := os.MkdirAll(builddir, 0755); err != nil {
+		return "", err
+	}
+	for i, name := range libnames {
+		src := stripped[i]
+		dst := filepath.Join(builddir, fmt.Sprintf("lib%s-%s.a", name, buildid))
+		if _, err := os.Stat(dst); err == nil {
+			// The build id is a hash of the content, so an existing
+			// file is identical to the one we would install.
+			logger.Info("Library already installed", zap.String("dst", dst))
+			continue
+		}
+		logger.Info("Installing library", zap.String("src", src), zap.String("dst", dst))
+		if err := os.Rename(src, dst); err != nil {
+			// A concurrent invocation may have installed the same
+			// archive in the meantime, which is a problem only on
+			// platforms where rename does not replace the target.
+			if _, serr := os.Stat(dst); serr == nil {
+				logger.Info("Library installed concurrently", zap.String("dst", dst))
+				continue
+			}
+			logger.Error("Could not install library", zap.Error(err))
 			return "", err
 		}
 	}
 	return buildid, nil
 }
 
-func (l *Library) determineBuildId(targetdir string, libnames []string) (string, error) {
+func determineBuildId(paths []string) (string, error) {
 	shasum := sha256.New()
-	for _, name := range libnames {
-		basename := fmt.Sprintf("lib%s.a", name)
-		src := filepath.Join(targetdir, basename)
-		data, err := os.ReadFile(src)
+	for _, path := range paths {
+		data, err := os.ReadFile(path)
 		if err != nil {
 			return "", err
 		}
@@ -268,7 +314,7 @@ func (l *Library) WritePackageConfig(w io.Writer, buildid string) error {
 	_, _ = fmt.Fprintf(w, "prefix=%s\n", strings.ReplaceAll(prefix, string(os.PathSeparator), pcSep))
 	_, _ = fmt.Fprintf(w, "exec_prefix=%s\n", strings.ReplaceAll(execPrefix, string(os.PathSeparator), pcSep))
 	_, _ = fmt.Fprintf(w, "buildid=%s\n", buildid)
-	_, _ = io.WriteString(w, fmt.Sprintf(`libdir=${exec_prefix}%[1]slib
+	_, _ = io.WriteString(w, fmt.Sprintf(`libdir=${exec_prefix}%[1]slib%[1]s${buildid}
 includedir=${prefix}%[1]sinclude
 
 Name: Flux
@@ -499,30 +545,6 @@ func getTarget(static bool) (Target, error) {
 	}
 
 	return Target{OS: goos, Arch: goarch, Arm: goarm, Static: static}, nil
-}
-
-// safeLink will safely link or copy the file from src to dst.
-func safeLink(src, dst string) error {
-	if err := os.Link(src, dst); err == nil {
-		return nil
-	}
-
-	srcf, err := os.Open(src)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = srcf.Close() }()
-
-	dstf, err := os.Create(dst)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = dstf.Close() }()
-
-	if _, err := io.Copy(dstf, srcf); err != nil {
-		return err
-	}
-	return dstf.Close()
 }
 
 // gocmd is the value of environment variable GO if it is non-empty,
